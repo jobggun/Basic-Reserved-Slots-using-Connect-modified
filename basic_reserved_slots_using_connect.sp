@@ -56,11 +56,29 @@ public bool OnClientPreConnectEx(const char[] name, char password[255], const ch
 	{
 		return true;
 	}
+
+	bool kickCondition = false;
+
+	if (GetAdminFlag(admin, Admin_Generic))
+	{
+		kickCondition = true;
+	}
 	
-	if (GetAdminFlag(admin, Admin_Reservation))
+	if (!kickCondition && GetAdminFlag(admin, Admin_Reservation))
+	{
+		Database db = connectToDatabase();
+
+		if(db != null)
+		{
+			kickCondition = !checkIfUsageExceeded(db, steamID);
+			delete db;
+		}
+	}
+
+	if(kickCondition)
 	{
 		int target = SelectKickClient();
-						
+		
 		if (target)
 		{
 			char rReason[255];
@@ -86,7 +104,7 @@ int SelectKickClient()
 	
 	for (int i = 1; i <= MaxClients; i++)
 	{	
-		if (!IsClientConnected(i))
+		if (!IsValidClient(i))
 		{
 			continue;
 		}
@@ -99,34 +117,31 @@ int SelectKickClient()
 		}
 		
 		value = 0.0;
-			
-		if (IsClientInGame(i))
+		
+		switch(GetConVarInt(g_hcvarKickType))
 		{
-			switch(GetConVarInt(g_hcvarKickType))
+			case 1:
 			{
-				case 1:
-				{
-					value = GetClientAvgLatency(i, NetFlow_Outgoing);
-				}
-				case 2:
-				{
-					value = GetClientTime(i);
-				}
-				default:
-				{
-					value = GetRandomFloat(0.0, 100.0);
-				}
+				value = GetClientAvgLatency(i, NetFlow_Outgoing);
 			}
+			case 2:
+			{
+				value = GetClientTime(i);
+			}
+			default:
+			{
+				value = GetRandomFloat(0.0, 100.0);
+			}
+		}
 
-			if (IsClientObserver(i))
-			{			
-				specFound = true;
-				
-				if (value > highestSpecValue)
-				{
-					highestSpecValue = value;
-					highestSpecValueId = i;
-				}
+		if (IsClientObserver(i))
+		{			
+			specFound = true;
+			
+			if (value > highestSpecValue)
+			{
+				highestSpecValue = value;
+				highestSpecValueId = i;
 			}
 		}
 		
@@ -143,4 +158,165 @@ int SelectKickClient()
 	}
 	
 	return highestValueId;
+}
+
+stock bool IsValidClient(int client, bool replaycheck=true)
+{
+	if(client<=0 || client>MaxClients)
+		return false;
+
+	if(!IsClientConnected(client))
+		return false;
+
+	if(!IsClientInGame(client))
+		return false;
+
+	if(GetEntProp(client, Prop_Send, "m_bIsCoaching"))
+		return false;
+
+	if(replaycheck && (IsClientSourceTV(client) || IsClientReplay(client)))
+		return false;
+	
+	return true;
+}
+
+bool checkIfUsageExceeded(Database db, const char[] steamID)
+{
+	int usage = 0;
+	int expired = 0;
+
+	if(!InsertUsage(db, steamID)) return false;
+	if(!SelectUsage(db, steamID, usage, expired)) return false;
+
+	if(expired)
+	{
+		UpdateUsage(db, steamID, 1);
+	}
+	else if(usage >= 3)
+	{
+		return true;
+	}
+	else
+	{
+		UpdateUsage(db, steamID, usage + 1);
+	}
+
+	return false;
+}
+
+// DB
+
+bool db_createTableSuccess = false;
+
+char db_createReserveUsage[] = "CREATE TABLE IF NOT EXISTS `vip_reserved` ( \
+	`steam_id` varchar(256) NOT NULL, \
+	`usage` int NOT NULL, \
+	`timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(), \
+	PRIMARY KEY (`steam_id`) \
+);";
+
+char db_usageInsert[] = "INSERT IGNORE INTO `vip_reserved` (`steam_id`, `usage`) VALUES ('%s', 0);";
+char db_usageSelect[] = "SELECT `usage`, (`timestamp` < current_date()) AS `expired` FROM `vip_reserved` WHERE `steam_id` = '%s';";
+char db_usageUpdate[] = "UPDATE `vip_reserved` SET `usage` = %d WHERE `steam_id` = '%s';";
+
+Database connectToDatabase()
+{
+	char error[255];
+	Database db;
+	
+	if(SQL_CheckConfig("vip_reserved"))
+	{
+		db = SQL_Connect("vip_reserved", true, error, sizeof(error));
+	}
+	else
+	{
+		db = SQL_Connect("default", true, error, sizeof(error));
+	}
+	
+	if(db == null)
+	{
+		LogError("Could not connect to database: %s", error);
+
+		return db;
+	}
+
+	if(!db_createTableSuccess && !SQL_FastQuery(db, db_createReserveUsage))
+	{
+		SQL_GetError(db, error, sizeof(error));
+		LogError("Could not query to database: %s", error);
+
+		delete db;
+		return null;
+	}
+
+	db_createTableSuccess = true;
+	
+	return db;
+}
+
+bool InsertUsage(Database db, const char[] steamID)
+{
+	char error[255];
+
+	int queryStatementLength = sizeof(db_usageInsert) + strlen(steamID);
+	char[] queryStatement = new char[queryStatementLength];
+	Format(queryStatement, queryStatementLength, db_usageInsert, steamID);
+
+	if(!SQL_FastQuery(db, queryStatement))
+	{
+		SQL_GetError(db, error, sizeof(error));
+		LogError("Could not query to database: %s", error);
+
+		return false;
+	}
+
+	return true;
+}
+
+bool SelectUsage(Database db, const char[] steamID, int &usage, int &expired)
+{
+	char error[255];
+
+	int queryStatementLength = sizeof(db_usageSelect) + strlen(steamID);
+	char[] queryStatement = new char[queryStatementLength];
+	Format(queryStatement, queryStatementLength, db_usageSelect, steamID);
+
+	DBResultSet hQuery;
+
+	if((hQuery = SQL_Query(db, queryStatement)) == null)
+	{
+		SQL_GetError(db, error, sizeof(error));
+		LogError("Could not query to database: %s", error);
+
+		return false;
+	}
+
+	if(SQL_FetchRow(hQuery))
+	{
+		usage = SQL_FetchInt(hQuery, 0);
+		expired = SQL_FetchInt(hQuery, 1);
+	}
+
+	delete hQuery;
+
+	return true;
+}
+
+bool UpdateUsage(Database db, const char[] steamID, int usage)
+{
+	char error[255];
+
+	int queryStatementLength = sizeof(db_usageUpdate) + strlen(steamID);
+	char[] queryStatement = new char[queryStatementLength];
+	Format(queryStatement, queryStatementLength, db_usageUpdate, usage, steamID);
+
+	if(!SQL_FastQuery(db, queryStatement))
+	{
+		SQL_GetError(db, error, sizeof(error));
+		LogError("Could not query to database: %s", error);
+
+		return false;
+	}
+
+	return true;
 }
