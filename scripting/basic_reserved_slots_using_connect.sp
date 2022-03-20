@@ -1,4 +1,5 @@
 #include <sourcemod>
+#include <clientprefs>
 
 #pragma newdecls required
 #pragma semicolon 1
@@ -25,6 +26,9 @@ int g_icvarPlayerCountCondition = 28;
 bool g_bPlayerTickStartEnabled = false;
 int g_iPlayerTickStartTime[MAXPLAYERS + 1] = { 0, ... };
 int g_iCurrentValidPlayerCount = 0;
+
+Cookie g_hReservedSlotsUsageCookie = null;
+StringMap g_hReservedSlotsUsageTempStringMap = null;
 
 forward bool OnClientPreConnectEx(const char[] name, char password[255], const char[] ip, const char[] steamID, char rejectReason[255]);
 
@@ -59,6 +63,11 @@ public void OnPluginStart()
 	SetConVarString(g_hcvarVer, PLUGIN_VERSION);	
 	AutoExecConfig(true, "Basic_Reserved_Slots_using_Connect");
 
+	g_hReservedSlotsUsageCookie = new Cookie("brsc_reserved_used", "Whether client used reserved slots in the session", CookieAccess_Protected);
+	g_hReservedSlotsUsageTempStringMap = new StringMap();
+
+	HookEvent("player_disconnect", Event_PlayerDisconnect, EventHookMode_Pre);
+
 	if(g_bLateLoad)
 	{
 		g_iCurrentValidPlayerCount = 0;
@@ -91,6 +100,9 @@ public void OnPluginStart()
 
 public void OnPluginEnd()
 {
+	delete g_hReservedSlotsUsageTempStringMap;
+	delete g_hReservedSlotsUsageCookie;
+
 	if(g_bPlayerTickStartEnabled)
 	{
 		int time_played;
@@ -152,6 +164,23 @@ public void OnClientPutInServer(int client)
 	else
 	{
 		g_iPlayerTickStartTime[client] = currentTime;
+	}
+}
+
+public void OnClientCookiesCached(int client)
+{
+	char steamID[32];
+	GetClientAuthId(client, AuthId_Steam2, steamID, sizeof(steamID));
+
+	int value = 0;
+	if(g_hReservedSlotsUsageTempStringMap.GetValue(steamID, value) && value == 1)
+	{
+		SetClientCookie(client, g_hReservedSlotsUsageCookie, "1");
+		g_hReservedSlotsUsageTempStringMap.Remove(steamID);
+	}
+	else
+	{
+		SetClientCookie(client, g_hReservedSlotsUsageCookie, "0");
 	}
 }
 
@@ -288,10 +317,46 @@ public bool OnClientPreConnectEx(const char[] name, char password[255], const ch
 			char rReason[255];
 			GetConVarString(g_hcvarReason, rReason, sizeof(rReason));
 			KickClientEx(target, "%s", rReason);
+
+			g_hReservedSlotsUsageTempStringMap.SetValue(steamID, 1);
 		}
 	}
 	
 	return true;
+}
+
+public Action Event_PlayerDisconnect(Event event, const char[] name, bool dontBroadcast)
+{
+	int userid = event.GetInt("userid");
+	int client = GetClientOfUserId(userid);
+
+	if(!IsValidClient(client))
+		return Plugin_Continue;
+	
+	if(!AreClientCookiesCached(client))
+		return Plugin_Continue;
+
+	char reserved[4] = "0";
+	GetClientCookie(client, g_hReservedSlotsUsageCookie, reserved, sizeof(reserved));
+
+	int iReserved = StringToInt(reserved);
+
+	if(iReserved == 0)
+		return Plugin_Continue;
+	
+	char steamID[32];
+	GetClientAuthId(client, AuthId_Steam2, steamID, sizeof(steamID));
+
+	Database db = connectToDatabase();
+
+	if(db == null)
+		return Plugin_Continue;
+		
+	InsertUsage(db, steamID, steamID);
+
+	delete db;
+
+	return Plugin_Continue;
 }
 
 int SelectKickClient()
