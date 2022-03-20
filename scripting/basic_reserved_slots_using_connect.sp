@@ -102,6 +102,11 @@ public void OnPluginEnd()
 
 		Database db = connectToDatabase();
 
+		if(db == null)
+		{
+			return;
+		}
+
 		for(int i = 1; i <= MaxClients; i++)
 		{
 			if(g_iPlayerTickStartTime[i] == 0)
@@ -178,6 +183,11 @@ public void OnClientDisconnect(int client)
 
 		Database db = connectToDatabase();
 
+		if(db == null)
+		{
+			return;
+		}
+
 		InsertTimePlayed(db, steamID, time_played);
 
 		delete db;
@@ -187,6 +197,11 @@ public void OnClientDisconnect(int client)
 		g_bPlayerTickStartEnabled = false;
 
 		Database db = connectToDatabase();
+
+		if(db == null)
+		{
+			return;
+		}
 
 		for(int i = 1; i <= MaxClients; i++)
 		{
@@ -225,21 +240,19 @@ public bool OnClientPreConnectEx(const char[] name, char password[255], const ch
 		return true;
 	}
 
+	Database db = null;
 	bool kickCondition = false;
 
 	if (GetAdminFlag(admin, Admin_Generic))
 	{
-		Database db = connectToDatabase();
-
-		InsertUsage(db, steamID);
 		kickCondition = true;
-
-		delete db;
 	}
 	
 	if (!kickCondition && GetAdminFlag(admin, Admin_Reservation))
 	{
-		Database db = connectToDatabase();
+		db = connectToDatabase();
+
+		kickCondition = true;
 
 		if(db != null)
 		{
@@ -252,6 +265,24 @@ public bool OnClientPreConnectEx(const char[] name, char password[255], const ch
 	{
 		int target = SelectKickClient();
 		
+		if(db == null)
+		{
+			db = connectToDatabase();
+		}
+
+		if(target && db != null)
+		{
+			char targetSteamID[32];
+			GetClientAuthId(target, AuthId_Steam2, targetSteamID, sizeof(targetSteamID));
+
+			InsertUsage(db, steamID, targetSteamID);
+		}
+
+		if(db != null)
+		{
+			delete db;
+		}
+
 		if (target)
 		{
 			char rReason[255];
@@ -275,13 +306,19 @@ int SelectKickClient()
 	
 	float value;
 	
-	Database db;
+	Database db = null;
 	char steamID[32];
 	int currentTime;
 
-	if(GetConVarInt(g_hcvarKickType) == 3)
+	int ikickType = GetConVarInt(g_hcvarKickType);
+
+	if(ikickType == 3)
 	{
 		db = connectToDatabase();
+		if(db == null)
+		{
+			ikickType = 2;
+		}
 		currentTime = GetTime();
 	}
 	
@@ -301,7 +338,7 @@ int SelectKickClient()
 		
 		value = 0.0;
 		
-		switch(GetConVarInt(g_hcvarKickType))
+		switch(ikickType)
 		{
 			case 1:
 			{
@@ -352,7 +389,7 @@ int SelectKickClient()
 	
 	if (specFound)
 	{
-		if(GetConVarInt(g_hcvarKickType) == 3)
+		if(ikickType == 3)
 		{
 			int time = 0;
 
@@ -371,7 +408,7 @@ int SelectKickClient()
 		return highestSpecValueId;
 	}
 
-	if(GetConVarInt(g_hcvarKickType) == 3)
+	if(ikickType == 3)
 	{
 		int time = 0;
 
@@ -421,8 +458,6 @@ bool checkIfUsageExceeded(Database db, const char[] steamID)
 		return true;
 	}
 
-	InsertUsage(db, steamID);
-
 	return false;
 }
 
@@ -470,6 +505,11 @@ void ConVarPlayerCountCondition(ConVar convar, const char[] oldValue, const char
 
 		Database db = connectToDatabase();
 
+		if(db == null)
+		{
+			return;
+		}
+
 		for(int i = 1; i <= MaxClients; i++)
 		{
 			if(g_iPlayerTickStartTime[i] == 0)
@@ -495,11 +535,12 @@ bool db_createTableSuccess = false;
 char db_createReserveUsage[] = "CREATE TABLE IF NOT EXISTS `reserved_slots_usage` ( \
 	`id` INT NOT NULL AUTO_INCREMENT PRIMARY KEY, \
 	`steam_id` VARCHAR(32) NOT NULL, \
+	`victim_steam_id` VARCHAR(32) NOT NULL, \
 	`timestamp` TIMESTAMP DEFAULT CURRENT_TIMESTAMP() \
 );";
 
-char db_usageInsert[] = "INSERT INTO `reserved_slots_usage` (`steam_id`) VALUES ('%s');";
-char db_usageSelect[] = "SELECT EXISTS(SELECT 1 FROM `reserved_slots_usage` WHERE `steam_id` = '%s' GROUP BY `steam_id` HAVING MAX(`timestamp`) < NOW() - INTERVAL %d MINUTE) OR NOT EXISTS(SELECT 1 FROM `reserved_slots_usage` WHERE `steam_id` = '%s' LIMIT 1);";
+char db_usageInsert[] = "INSERT INTO `reserved_slots_usage` (`steam_id`, `victim_steam_id`) VALUES ('%s', '%s');";
+char db_usageSelect[] = "SELECT NOT EXISTS(SELECT 1 FROM `reserved_slots_usage` WHERE `steam_id` = '%s' GROUP BY `steam_id` HAVING MAX(`timestamp`) >= NOW() - INTERVAL %d MINUTE) AND NOT EXISTS(SELECT 1 FROM `reserved_slots_usage` WHERE `victim_steam_id` = '%s' GROUP BY `victim_steam_id` HAVING MAX(`timestamp`) >= NOW() - INTERVAL %d MINUTE);";
 
 char db_createTimePlayed[] = "CREATE TABLE IF NOT EXISTS `time_played` ( \
 	`id` INT NOT NULL AUTO_INCREMENT PRIMARY KEY, \
@@ -548,13 +589,13 @@ Database connectToDatabase()
 	return db;
 }
 
-bool InsertUsage(Database db, const char[] steamID)
+bool InsertUsage(Database db, const char[] steamID, const char[] victimSteamID)
 {
 	char error[255];
 
-	int queryStatementLength = sizeof(db_usageInsert) + strlen(steamID);
+	int queryStatementLength = sizeof(db_usageInsert) + strlen(steamID) + strlen(victimSteamID);
 	char[] queryStatement = new char[queryStatementLength];
-	Format(queryStatement, queryStatementLength, db_usageInsert, steamID);
+	Format(queryStatement, queryStatementLength, db_usageInsert, steamID, victimSteamID);
 
 	if(!SQL_FastQuery(db, queryStatement))
 	{
@@ -571,9 +612,9 @@ bool SelectUsage(Database db, const char[] steamID, int &available)
 {
 	char error[255];
 
-	int queryStatementLength = sizeof(db_usageSelect) + 2 * strlen(steamID) + 10;
+	int queryStatementLength = sizeof(db_usageSelect) + 2 * strlen(steamID) + 20;
 	char[] queryStatement = new char[queryStatementLength];
-	Format(queryStatement, queryStatementLength, db_usageSelect, steamID, g_icvarCooldownTime, steamID);
+	Format(queryStatement, queryStatementLength, db_usageSelect, steamID, g_icvarCooldownTime, steamID, g_icvarCooldownTime);
 
 	DBResultSet hQuery;
 
