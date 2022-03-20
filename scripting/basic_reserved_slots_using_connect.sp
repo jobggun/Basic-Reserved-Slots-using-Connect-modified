@@ -290,6 +290,17 @@ public bool OnClientPreConnectEx(const char[] name, char password[255], const ch
 		}
 	}
 
+	if (!kickCondition)
+	{
+		db = connectToDatabase();
+
+		if(db != null)
+		{
+			kickCondition = checkNonDonorAllowed(db, steamID);
+			delete db;
+		}
+	}
+
 	if(kickCondition)
 	{
 		int target = SelectKickClient();
@@ -501,6 +512,22 @@ bool checkIfUsageExceeded(Database db, const char[] steamID)
 	return false;
 }
 
+bool checkNonDonorAllowed(Database db, const char[] steamID)
+{
+	int available1 = 0;
+	int available2 = 0;
+
+	if(!SelectNonDonorUsage(db, steamID, available1)) return false;
+	if(!SelectUsage(db, steamID, available2)) return false;
+
+	if(!available1 || !available2)
+	{
+		return false;
+	}
+
+	return true;
+}
+
 // ConVar
 
 void ConVarCooldownTime(ConVar convar, const char[] oldValue, const char[] newValue)
@@ -581,6 +608,7 @@ char db_createReserveUsage[] = "CREATE TABLE IF NOT EXISTS `reserved_slots_usage
 
 char db_usageInsert[] = "INSERT INTO `reserved_slots_usage` (`steam_id`, `victim_steam_id`) VALUES ('%s', '%s');";
 char db_usageSelect[] = "SELECT NOT EXISTS(SELECT 1 FROM `reserved_slots_usage` WHERE `steam_id` = '%s' GROUP BY `steam_id` HAVING MAX(`timestamp`) >= NOW() - INTERVAL %d MINUTE) AND NOT EXISTS(SELECT 1 FROM `reserved_slots_usage` WHERE `victim_steam_id` = '%s' GROUP BY `victim_steam_id` HAVING MAX(`timestamp`) >= NOW() - INTERVAL %d MINUTE);";
+char db_usageNonDonorSelect[] = "SELECT (SELECT COUNT(*) FROM `reserved_slots_usage` WHERE `victim_steam_id` = '%s' AND `steam_id` != `victim_steam_id`) - 2 * (SELECT COUNT(*) FROM `reserved_slots_usage` WHERE `steam_id` = '%s' AND `steam_id` != `victim_steam_id`) >= 2;";
 
 char db_createTimePlayed[] = "CREATE TABLE IF NOT EXISTS `time_played` ( \
 	`id` INT NOT NULL AUTO_INCREMENT PRIMARY KEY, \
@@ -655,6 +683,34 @@ bool SelectUsage(Database db, const char[] steamID, int &available)
 	int queryStatementLength = sizeof(db_usageSelect) + 2 * strlen(steamID) + 20;
 	char[] queryStatement = new char[queryStatementLength];
 	Format(queryStatement, queryStatementLength, db_usageSelect, steamID, g_icvarCooldownTime, steamID, g_icvarCooldownTime);
+
+	DBResultSet hQuery;
+
+	if((hQuery = SQL_Query(db, queryStatement)) == null)
+	{
+		SQL_GetError(db, error, sizeof(error));
+		LogError("Could not query to database: %s", error);
+
+		return false;
+	}
+
+	if(SQL_FetchRow(hQuery))
+	{
+		available = SQL_FetchInt(hQuery, 0);
+	}
+
+	delete hQuery;
+
+	return true;
+}
+
+bool SelectNonDonorUsage(Database db, const char[] steamID, int &available)
+{
+	char error[255];
+
+	int queryStatementLength = sizeof(db_usageNonDonorSelect) + 2 * strlen(steamID);
+	char[] queryStatement = new char[queryStatementLength];
+	Format(queryStatement, queryStatementLength, db_usageNonDonorSelect, steamID, steamID);
 
 	DBResultSet hQuery;
 
