@@ -304,6 +304,8 @@ public bool OnClientPreConnectEx(const char[] name, char password[255], const ch
 			char targetSteamID[32];
 			GetClientAuthId(target, AuthId_Steam2, targetSteamID, sizeof(targetSteamID));
 
+			ResetTimePlayed(db, targetSteamID);
+
 			InsertUsage(db, steamID, targetSteamID);
 		}
 
@@ -396,7 +398,7 @@ int SelectKickClient()
 	
 		int flags = GetUserFlagBits(i);
 		
-		if (IsFakeClient(i) || flags & ADMFLAG_ROOT || flags & ADMFLAG_RESERVATION || CheckCommandAccess(i, "sm_reskick_immunity", ADMFLAG_RESERVATION, false))
+		if (IsFakeClient(i) || flags & ADMFLAG_ROOT || flags & ADMFLAG_GENERIC || CheckCommandAccess(i, "sm_reskick_immunity", ADMFLAG_GENERIC, false))
 		{
 			continue;
 		}
@@ -451,42 +453,15 @@ int SelectKickClient()
 			highestValueId = i;
 		}
 	}
+
+	if(db != null)
+	{
+		delete db;
+	}
 	
 	if (specFound)
 	{
-		if(ikickType == 3)
-		{
-			int time = 0;
-
-			GetClientAuthId(highestSpecValueId, AuthId_Steam2, steamID, sizeof(steamID));
-
-			if(g_iPlayerTickStartTime[highestSpecValueId] != 0)
-			{
-				time = currentTime - g_iPlayerTickStartTime[highestSpecValueId];
-			}
-
-			ResetTimePlayed(db, steamID, time);
-
-			delete db;
-		}
-		
 		return highestSpecValueId;
-	}
-
-	if(ikickType == 3)
-	{
-		int time = 0;
-
-		GetClientAuthId(highestValueId, AuthId_Steam2, steamID, sizeof(steamID));
-
-		if(g_iPlayerTickStartTime[highestValueId] != 0)
-		{
-			time = currentTime - g_iPlayerTickStartTime[highestValueId];
-		}
-
-		ResetTimePlayed(db, steamID, time);
-
-		delete db;
 	}
 	
 	return highestValueId;
@@ -616,7 +591,7 @@ char db_createTimePlayed[] = "CREATE TABLE IF NOT EXISTS `time_played` ( \
 );";
 
 char db_timePlayedInsert[] = "INSERT INTO `time_played` (`steam_id`, `total_time`, `session_time`) VALUES ('%s', IFNULL((SELECT `A`.`total_time` FROM (SELECT `total_time` + %d as `total_time` FROM `time_played` WHERE `steam_id` = '%s' ORDER BY `id` DESC LIMIT 1) as `A`), %d), %d);";
-char db_timePlayedReset[] = "INSERT INTO `time_played` (`steam_id`, `total_time`, `session_time`) VALUES ('%s', 0, %d);";
+char db_timePlayedReset[] = "INSERT INTO `time_played` (`steam_id`, `total_time`, `session_time`) VALUES ('%s', 0, 0);";
 char db_timePlayedSelect[] = "SELECT `total_time` FROM `time_played` WHERE `steam_id` = '%s' ORDER BY `id` DESC LIMIT 1;";
 
 Database connectToDatabase()
@@ -720,13 +695,13 @@ bool InsertTimePlayed(Database db, const char[] steamID, int time)
 	return true;
 }
 
-bool ResetTimePlayed(Database db, const char[] steamID, int time)
+bool ResetTimePlayed(Database db, const char[] steamID)
 {
 	char error[255];
 
-	int queryStatementLength = sizeof(db_timePlayedInsert) + strlen(steamID) + 10;
+	int queryStatementLength = sizeof(db_timePlayedInsert) + strlen(steamID);
 	char[] queryStatement = new char[queryStatementLength];
-	Format(queryStatement, queryStatementLength, db_timePlayedReset, steamID, time);
+	Format(queryStatement, queryStatementLength, db_timePlayedReset, steamID);
 
 	if(!SQL_FastQuery(db, queryStatement))
 	{
