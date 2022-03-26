@@ -252,28 +252,36 @@ public void OnClientDisconnect(int client)
 
 public bool OnClientPreConnectEx(const char[] name, char password[255], const char[] ip, const char[] steamID, char rejectReason[255])
 {
+	#if defined _DEBUG
+	LogMessage("[OnClientPreConnectEx] steamID: %s, GetClientCount(false): %d, GetClientCount(true): %d, MaxClients: %d", steamID, GetClientCount(false), GetClientCount(true), MaxClients);
+	#endif
+
 	if (!GetConVarInt(g_hcvarEnabled))
 	{
+		#if defined _DEBUG
+		LogMessage("[OnClientPreConnectEx] Plugin Disabled");
+		#endif
 		return true;
 	}
 
 	if (GetClientCount(false) < MaxClients)
 	{
+		#if defined _DEBUG
+		LogMessage("[OnClientPreConnectEx] GetClientCount(false) < MaxClients");
+		#endif
 		return true;	
 	}
 
 	AdminId admin = FindAdminByIdentity(AUTHMETHOD_STEAM, steamID);
-	
-	if (admin == INVALID_ADMIN_ID)
-	{
-		return true;
-	}
 
 	Database db = null;
 	bool kickCondition = false;
 
 	if (GetAdminFlag(admin, Admin_Generic))
 	{
+		#if defined _DEBUG
+		LogMessage("[OnClientPreConnectEx] Access Granted: Admin_Generic (b flag)");
+		#endif
 		kickCondition = true;
 	}
 	
@@ -285,9 +293,25 @@ public bool OnClientPreConnectEx(const char[] name, char password[255], const ch
 
 		if(db != null)
 		{
+			#if defined _DEBUG
+			LogMessage("[OnClientPreConnectEx] Checking if connecting player is applicable to reservation...");
+			#endif
 			kickCondition = !checkIfUsageExceeded(db, steamID);
 			delete db;
 		}
+		else
+		{
+			#if defined _DEBUG
+			LogMessage("[OnClientPreConnectEx] Database fail, Granting access without checking...");
+			#endif
+		}
+
+		#if defined _DEBUG
+		if(kickCondition)
+			LogMessage("[OnClientPreConnectEx] Access Granted: Admin_Reservation (a flag)");
+		else
+			LogMessage("[OnClientPreConnectEx] Access Denied: Admin_Reservation (a flag)");
+		#endif
 	}
 
 	if (!kickCondition)
@@ -296,14 +320,38 @@ public bool OnClientPreConnectEx(const char[] name, char password[255], const ch
 
 		if(db != null)
 		{
+			#if defined _DEBUG
+			LogMessage("[OnClientPreConnectEx] Checking if connecting player is applicable to reservation...");
+			#endif
 			kickCondition = checkNonDonorAllowed(db, steamID);
 			delete db;
 		}
+		else
+		{
+			#if defined _DEBUG
+			LogMessage("[OnClientPreConnectEx] Database fail, Denying access without checking...");
+			#endif
+		}
+
+		#if defined _DEBUG
+		if(kickCondition)
+			LogMessage("[OnClientPreConnectEx] Access Granted: Not admin (no flag)");
+		else
+			LogMessage("[OnClientPreConnectEx] Access Denied: Not admin (no flag)");
+		#endif
 	}
 
 	if(kickCondition)
 	{
+		#if defined _DEBUG
+		LogMessage("[OnClientPreConnectEx] Invoking SelectKickClient for selecting client to kick...");
+		#endif
+
 		int target = SelectKickClient();
+
+		#if defined _DEBUG
+		LogMessage("[OnClientPreConnectEx] Selected client to kick");
+		#endif
 		
 		if(db == null)
 		{
@@ -315,8 +363,14 @@ public bool OnClientPreConnectEx(const char[] name, char password[255], const ch
 			char targetSteamID[32];
 			GetClientAuthId(target, AuthId_Steam2, targetSteamID, sizeof(targetSteamID));
 
+			#if defined _DEBUG
+			LogMessage("[OnClientPreConnectEx] Resetting the total play time of target player: %s...", targetSteamID);
+			#endif
 			ResetTimePlayed(db, targetSteamID);
 
+			#if defined _DEBUG
+			LogMessage("[OnClientPreConnectEx] Inserting the usage of reservation slots of player: (%s, %s)...", steamID, targetSteamID);
+			#endif
 			InsertUsage(db, steamID, targetSteamID);
 		}
 
@@ -329,6 +383,9 @@ public bool OnClientPreConnectEx(const char[] name, char password[255], const ch
 		{
 			char rReason[255];
 			GetConVarString(g_hcvarReason, rReason, sizeof(rReason));
+			#if defined _DEBUG
+			LogMessage("[OnClientPreConnectEx] Kicking target player...");
+			#endif
 			KickClientEx(target, "%s", rReason);
 
 			g_hReservedSlotsUsageTempStringMap.SetValue(steamID, 1);
