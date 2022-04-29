@@ -4,6 +4,8 @@
 #pragma newdecls required
 #pragma semicolon 1
 
+//#define _DEBUG
+
 #define PLUGIN_VERSION "1.00"
 
 public Extension __ext_Connect = 
@@ -19,6 +21,7 @@ ConVar g_hcvarEnabled;
 ConVar g_hcvarReason;
 ConVar g_hcvarCooldownTime;
 ConVar g_hcvarPlayerCountCondition;
+ConVar g_hcvarRedirectionServerAddress;
 
 int g_icvarCooldownTime = 60;
 int g_icvarPlayerCountCondition = 28;
@@ -26,6 +29,8 @@ int g_icvarPlayerCountCondition = 28;
 bool g_bPlayerTickStartEnabled = false;
 int g_iPlayerTickStartTime[MAXPLAYERS + 1] = { 0, ... };
 int g_iCurrentValidPlayerCount = 0;
+
+char g_sRedirectionServerAddress[128] = "";
 
 Cookie g_hReservedSlotsUsageCookie = null;
 StringMap g_hReservedSlotsUsageTempStringMap = null;
@@ -36,7 +41,7 @@ bool g_bLateLoad = false;
 
 public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
 {
-    g_bLateLoad = true;
+	g_bLateLoad = true;
 }
 
 public Plugin myinfo = 
@@ -56,9 +61,11 @@ public void OnPluginStart()
 	g_hcvarReason = CreateConVar("sm_brsc_reason", "Kicked to make room for an admin", "Reason used when kicking players", FCVAR_NONE);
 	g_hcvarCooldownTime = CreateConVar("sm_brsc_cooldown_time", "60", "Cooldown time for re use of reservation slot", FCVAR_NONE);
 	g_hcvarPlayerCountCondition = CreateConVar("sm_brsc_player_count", "28", "Minimum players count for kick player queue", FCVAR_NONE);
+	g_hcvarRedirectionServerAddress = CreateConVar("sm_brsc_redirection_server_address", "", "Redirected server address for kicked players (\"\" for No redirection)", FCVAR_NONE);
 
 	HookConVarChange(g_hcvarCooldownTime, ConVarCooldownTime);
 	HookConVarChange(g_hcvarPlayerCountCondition, ConVarPlayerCountCondition);
+	HookConVarChange(g_hcvarRedirectionServerAddress, ConVarRedirectionServerAddress);
 
 	SetConVarString(g_hcvarVer, PLUGIN_VERSION);	
 	AutoExecConfig(true, "Basic_Reserved_Slots_using_Connect");
@@ -386,6 +393,12 @@ public bool OnClientPreConnectEx(const char[] name, char password[255], const ch
 			#if defined _DEBUG
 			LogMessage("[OnClientPreConnectEx] Kicking target player...");
 			#endif
+
+			if(!StrEqual(g_sRedirectionServerAddress, ""))
+			{
+				ClientCommand(target, "redirect %s", g_sRedirectionServerAddress);
+			}
+
 			KickClientEx(target, "%s", rReason);
 
 			g_hReservedSlotsUsageTempStringMap.SetValue(steamID, 1);
@@ -446,6 +459,9 @@ int SelectKickClient()
 	int currentTime;
 
 	int ikickType = GetConVarInt(g_hcvarKickType);
+	#if defined _DEBUG
+	LogMessage("[SelectKickClient] Kick type convar int is %d", ikickType);
+	#endif
 
 	if(ikickType == 3)
 	{
@@ -453,14 +469,29 @@ int SelectKickClient()
 		if(db == null)
 		{
 			ikickType = 2;
+			#if defined _DEBUG
+			LogMessage("[SelectKickClient] DB failure, setting iKickType to %d", ikickType);
+			#endif
+		}
+		else
+		{
+			#if defined _DEBUG
+			LogMessage("[SelectKickClient] DB success");
+			#endif
 		}
 		currentTime = GetTime();
 	}
 	
 	for (int i = 1; i <= MaxClients; i++)
-	{	
+	{
+		#if defined _DEBUG
+		LogMessage("[SelectKickClient] client num %d: ", i);
+		#endif
 		if (!IsValidClient(i))
 		{
+			#if defined _DEBUG
+			LogMessage("[SelectKickClient] Not valid client ");
+			#endif
 			continue;
 		}
 	
@@ -468,6 +499,9 @@ int SelectKickClient()
 		
 		if (IsFakeClient(i) || flags & ADMFLAG_ROOT || flags & ADMFLAG_GENERIC || CheckCommandAccess(i, "sm_reskick_immunity", ADMFLAG_GENERIC, false))
 		{
+			#if defined _DEBUG
+			LogMessage("[SelectKickClient] Client is root or generic admin ");
+			#endif
 			continue;
 		}
 		
@@ -504,8 +538,15 @@ int SelectKickClient()
 			}
 		}
 
+		#if defined _DEBUG
+		LogMessage("[SelectKickClient] kickPriority: %f", value);
+		#endif
+
 		if (IsClientObserver(i))
-		{			
+		{
+			#if defined _DEBUG
+			LogMessage("[SelectKickClient] Client is spectator");
+			#endif	
 			specFound = true;
 			
 			if (value > highestSpecValue)
@@ -529,8 +570,15 @@ int SelectKickClient()
 	
 	if (specFound)
 	{
+		#if defined _DEBUG
+		LogMessage("[SelectKickClient] client who has highest priority is %d with value %f", highestSpecValueId, highestSpecValue);
+		#endif
 		return highestSpecValueId;
 	}
+
+	#if defined _DEBUG
+	LogMessage("[SelectKickClient] client who has highest priority is %d with value %f", highestValueId, highestValue);
+	#endif
 	
 	return highestValueId;
 }
@@ -650,6 +698,11 @@ void ConVarPlayerCountCondition(ConVar convar, const char[] oldValue, const char
 
 		delete db;
 	}
+}
+
+void ConVarRedirectionServerAddress(ConVar convar, const char[] oldValue, const char[] newValue)
+{
+	strcopy(g_sRedirectionServerAddress, sizeof(g_sRedirectionServerAddress), newValue);
 }
 
 // DB
