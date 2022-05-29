@@ -718,7 +718,7 @@ char db_createReserveUsage[] = "CREATE TABLE IF NOT EXISTS `reserved_slots_usage
 
 char db_usageInsert[] = "INSERT INTO `reserved_slots_usage` (`steam_id`, `victim_steam_id`) VALUES ('%s', '%s');";
 char db_usageSelect[] = "SELECT NOT EXISTS(SELECT 1 FROM `reserved_slots_usage` WHERE `steam_id` = '%s' GROUP BY `steam_id` HAVING MAX(`timestamp`) >= NOW() - INTERVAL %d MINUTE) AND NOT EXISTS(SELECT 1 FROM `reserved_slots_usage` WHERE `victim_steam_id` = '%s' GROUP BY `victim_steam_id` HAVING MAX(`timestamp`) >= NOW() - INTERVAL %d MINUTE);";
-char db_usageNonDonorSelect[] = "SELECT (SELECT COUNT(*) FROM `reserved_slots_usage` WHERE `victim_steam_id` = '%s' AND `steam_id` != `victim_steam_id`) - 2 * (SELECT COUNT(*) FROM `reserved_slots_usage` WHERE `steam_id` = '%s' AND `steam_id` != `victim_steam_id`) >= 2;";
+char db_usageNonDonorSelect[] = "SELECT (SELECT COUNT(*) FROM `reserved_slots_usage` WHERE `victim_steam_id` = '%s' AND `steam_id` != `victim_steam_id` AND TIMESTAMPDIFF(DAY, `timestamp`, CURRENT_TIMESTAMP()) < 2) - 2 * (SELECT COUNT(*) FROM `reserved_slots_usage` WHERE `steam_id` = '%s' AND `steam_id` != `victim_steam_id` AND TIMESTAMPDIFF(DAY, `timestamp`, CURRENT_TIMESTAMP()) < 2) >= 2;";
 
 char db_createTimePlayed[] = "CREATE TABLE IF NOT EXISTS `time_played` ( \
 	`id` INT NOT NULL AUTO_INCREMENT PRIMARY KEY, \
