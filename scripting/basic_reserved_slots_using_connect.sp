@@ -196,23 +196,17 @@ public void OnClientDisconnect(int client)
 
 public bool OnClientPreConnectEx(const char[] name, char password[255], const char[] ip, const char[] steamID, char rejectReason[255])
 {
-	#if defined _DEBUG
-	LogBRSCMessage("[OnClientPreConnectEx] steamID: %s, GetClientCount(false): %d, GetClientCount(true): %d, MaxClients: %d", steamID, GetClientCount(false), GetClientCount(true), MaxClients);
-	#endif
+	LogBRSCDebugMessage("[OnClientPreConnectEx] steamID: %s, GetClientCount(false): %d, GetClientCount(true): %d, MaxClients: %d", steamID, GetClientCount(false), GetClientCount(true), MaxClients);
 
 	if (!GetConVarInt(g_hcvarEnabled))
 	{
-		#if defined _DEBUG
-		LogBRSCMessage("[OnClientPreConnectEx] Plugin Disabled");
-		#endif
+		LogBRSCDebugMessage("[OnClientPreConnectEx] Plugin Disabled");
 		return true;
 	}
 
 	if (GetClientCount(false) < MaxClients)
 	{
-		#if defined _DEBUG
-		LogBRSCMessage("[OnClientPreConnectEx] GetClientCount(false) < MaxClients");
-		#endif
+		LogBRSCDebugMessage("[OnClientPreConnectEx] GetClientCount(false) < MaxClients");
 		return true;	
 	}
 
@@ -223,9 +217,7 @@ public bool OnClientPreConnectEx(const char[] name, char password[255], const ch
 
 	if (GetAdminFlag(admin, Admin_Generic))
 	{
-		#if defined _DEBUG
-		LogBRSCMessage("[OnClientPreConnectEx] Access Granted: Admin_Generic (b flag)");
-		#endif
+		LogBRSCDebugMessage("[OnClientPreConnectEx] Access Granted: Admin_Generic (b flag)");
 		kickCondition = true;
 	}
 	
@@ -237,25 +229,24 @@ public bool OnClientPreConnectEx(const char[] name, char password[255], const ch
 
 		if(db != null)
 		{
-			#if defined _DEBUG
-			LogBRSCMessage("[OnClientPreConnectEx] Checking if connecting player is applicable to reservation...");
-			#endif
+			LogBRSCDebugMessage("[OnClientPreConnectEx] Checking if connecting player is applicable to reservation...");
+
 			kickCondition = !checkIfUsageExceeded(db, steamID);
 			delete db;
 		}
 		else
 		{
-			#if defined _DEBUG
-			LogBRSCMessage("[OnClientPreConnectEx] Database fail, Granting access without checking...");
-			#endif
+			LogBRSCDebugMessage("[OnClientPreConnectEx] Database fail, Granting access without checking...");
 		}
 
-		#if defined _DEBUG
 		if(kickCondition)
-			LogBRSCMessage("[OnClientPreConnectEx] Access Granted: Admin_Reservation (a flag)");
+		{
+			LogBRSCDebugMessage("[OnClientPreConnectEx] Access Granted: Admin_Reservation (a flag)");
+		}
 		else
-			LogBRSCMessage("[OnClientPreConnectEx] Access Denied: Admin_Reservation (a flag)");
-		#endif
+		{
+			LogBRSCDebugMessage("[OnClientPreConnectEx] Access Denied: Admin_Reservation (a flag)");
+		}
 	}
 
 	if (!kickCondition)
@@ -264,38 +255,36 @@ public bool OnClientPreConnectEx(const char[] name, char password[255], const ch
 
 		if(db != null)
 		{
-			#if defined _DEBUG
-			LogBRSCMessage("[OnClientPreConnectEx] Checking if connecting player is applicable to reservation...");
-			#endif
+			LogBRSCDebugMessage("[OnClientPreConnectEx] Checking if connecting player is applicable to reservation...");
+
 			kickCondition = checkNonDonorAllowed(db, steamID);
 			delete db;
 		}
 		else
 		{
-			#if defined _DEBUG
-			LogBRSCMessage("[OnClientPreConnectEx] Database fail, Denying access without checking...");
-			#endif
+			LogBRSCDebugMessage("[OnClientPreConnectEx] Database fail, Denying access without checking...");
 		}
 
-		#if defined _DEBUG
+
 		if(kickCondition)
-			LogBRSCMessage("[OnClientPreConnectEx] Access Granted: Not admin (no flag)");
+		{
+			LogBRSCDebugMessage("[OnClientPreConnectEx] Access Granted: Not admin (no flag)");
+		}
 		else
-			LogBRSCMessage("[OnClientPreConnectEx] Access Denied: Not admin (no flag)");
-		#endif
+		{
+			LogBRSCDebugMessage("[OnClientPreConnectEx] Access Denied: Not admin (no flag)");
+		}
 	}
 
 	if(kickCondition)
 	{
-		#if defined _DEBUG
-		LogBRSCMessage("[OnClientPreConnectEx] Invoking SelectKickClient for selecting client to kick...");
-		#endif
+		LogBRSCDebugMessage("[OnClientPreConnectEx] Invoking SelectKickClient for selecting client to kick...");
 
 		int target = SelectKickClient();
 
-		#if defined _DEBUG
-		LogBRSCMessage("[OnClientPreConnectEx] Selected client to kick");
-		#endif
+
+		LogBRSCDebugMessage("[OnClientPreConnectEx] Selected client to kick");
+
 		
 		if(db == null)
 		{
@@ -307,14 +296,10 @@ public bool OnClientPreConnectEx(const char[] name, char password[255], const ch
 			char targetSteamID[32];
 			GetClientAuthId(target, AuthId_Steam2, targetSteamID, sizeof(targetSteamID));
 
-			#if defined _DEBUG
-			LogBRSCMessage("[OnClientPreConnectEx] Resetting the total play time of target player: %s...", targetSteamID);
-			#endif
+			LogBRSCDebugMessage("[OnClientPreConnectEx] Resetting the total play time of target player: %s...", targetSteamID);
 			ResetTimePlayed(db, targetSteamID);
 
-			#if defined _DEBUG
-			LogBRSCMessage("[OnClientPreConnectEx] Inserting the usage of reservation slots of player: (%s, %s)...", steamID, targetSteamID);
-			#endif
+			LogBRSCDebugMessage("[OnClientPreConnectEx] Inserting the usage of reservation slots of player: (%s, %s)...", steamID, targetSteamID);
 			InsertUsage(db, steamID, targetSteamID);
 		}
 
@@ -327,9 +312,7 @@ public bool OnClientPreConnectEx(const char[] name, char password[255], const ch
 		{
 			char rReason[255];
 			GetConVarString(g_hcvarReason, rReason, sizeof(rReason));
-			#if defined _DEBUG
-			LogBRSCMessage("[OnClientPreConnectEx] Kicking target player...");
-			#endif
+			LogBRSCDebugMessage("[OnClientPreConnectEx] Kicking target player...");
 
 			if(!StrEqual(g_sRedirectionServerAddress, ""))
 			{
@@ -396,9 +379,7 @@ int SelectKickClient()
 	int currentTime;
 
 	int ikickType = GetConVarInt(g_hcvarKickType);
-	#if defined _DEBUG
-	LogBRSCMessage("[SelectKickClient] Kick type convar int is %d", ikickType);
-	#endif
+	LogBRSCDebugMessage("[SelectKickClient] Kick type convar int is %d", ikickType);
 
 	if(ikickType == 3)
 	{
@@ -406,29 +387,22 @@ int SelectKickClient()
 		if(db == null)
 		{
 			ikickType = 2;
-			#if defined _DEBUG
-			LogBRSCMessage("[SelectKickClient] DB failure, setting iKickType to %d", ikickType);
-			#endif
+			LogBRSCDebugMessage("[SelectKickClient] DB failure, setting iKickType to %d", ikickType);
 		}
 		else
 		{
-			#if defined _DEBUG
-			LogBRSCMessage("[SelectKickClient] DB success");
-			#endif
+			LogBRSCDebugMessage("[SelectKickClient] DB success");
 		}
 		currentTime = GetTime();
 	}
 	
 	for (int i = 1; i <= MaxClients; i++)
 	{
-		#if defined _DEBUG
-		LogBRSCMessage("[SelectKickClient] client num %d: ", i);
-		#endif
+		LogBRSCDebugMessage("[SelectKickClient] client num %d: ", i);
+
 		if (!IsValidClient(i))
 		{
-			#if defined _DEBUG
-			LogBRSCMessage("[SelectKickClient] Not valid client ");
-			#endif
+			LogBRSCDebugMessage("[SelectKickClient] Not valid client ");
 			continue;
 		}
 	
@@ -436,9 +410,8 @@ int SelectKickClient()
 		
 		if (IsFakeClient(i) || flags & ADMFLAG_ROOT || flags & ADMFLAG_GENERIC || CheckCommandAccess(i, "sm_reskick_immunity", ADMFLAG_GENERIC, false))
 		{
-			#if defined _DEBUG
-			LogBRSCMessage("[SelectKickClient] Client is root or generic admin ");
-			#endif
+			LogBRSCDebugMessage("[SelectKickClient] Client is root or generic admin ");
+
 			continue;
 		}
 		
@@ -475,15 +448,12 @@ int SelectKickClient()
 			}
 		}
 
-		#if defined _DEBUG
-		LogBRSCMessage("[SelectKickClient] kickPriority: %f", value);
-		#endif
+		LogBRSCDebugMessage("[SelectKickClient] kickPriority: %f", value);
 
 		if (IsClientObserver(i))
 		{
-			#if defined _DEBUG
-			LogBRSCMessage("[SelectKickClient] Client is spectator");
-			#endif	
+			LogBRSCDebugMessage("[SelectKickClient] Client is spectator");
+
 			specFound = true;
 			
 			if (value > highestSpecValue)
@@ -507,15 +477,12 @@ int SelectKickClient()
 	
 	if (specFound)
 	{
-		#if defined _DEBUG
-		LogBRSCMessage("[SelectKickClient] client who has highest priority is %d with value %f", highestSpecValueId, highestSpecValue);
-		#endif
+		LogBRSCDebugMessage("[SelectKickClient] client who has highest priority is %d with value %f", highestSpecValueId, highestSpecValue);
+
 		return highestSpecValueId;
 	}
 
-	#if defined _DEBUG
-	LogBRSCMessage("[SelectKickClient] client who has highest priority is %d with value %f", highestValueId, highestValue);
-	#endif
+	LogBRSCDebugMessage("[SelectKickClient] client who has highest priority is %d with value %f", highestValueId, highestValue);
 	
 	return highestValueId;
 }
