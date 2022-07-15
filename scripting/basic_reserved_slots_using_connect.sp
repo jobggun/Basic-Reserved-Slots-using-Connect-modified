@@ -1,5 +1,6 @@
 #include <sourcemod>
 #include <clientprefs>
+#include <connect>
 
 #pragma newdecls required
 #pragma semicolon 1
@@ -8,41 +9,17 @@
 
 #define PLUGIN_VERSION "1.00"
 
-public Extension __ext_Connect = 
-{
-	name = "Connect",
-	file = "connect.ext",
-	autoload = 1,
-	required = 1,
-}
-
-ConVar g_hcvarKickType;
-ConVar g_hcvarEnabled;
-ConVar g_hcvarReason;
-ConVar g_hcvarCooldownTime;
-ConVar g_hcvarPlayerCountCondition;
-ConVar g_hcvarRedirectionServerAddress;
-
-int g_icvarCooldownTime = 60;
-int g_icvarPlayerCountCondition = 28;
-
 bool g_bPlayerTickStartEnabled = false;
 int g_iPlayerTickStartTime[MAXPLAYERS + 1] = { 0, ... };
 int g_iCurrentValidPlayerCount = 0;
 
-char g_sRedirectionServerAddress[128] = "";
-
 Cookie g_hReservedSlotsUsageCookie = null;
 StringMap g_hReservedSlotsUsageTempStringMap = null;
 
-forward bool OnClientPreConnectEx(const char[] name, char password[255], const char[] ip, const char[] steamID, char rejectReason[255]);
-
-bool g_bLateLoad = false;
-
-public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
-{
-	g_bLateLoad = true;
-}
+#include <basic_reserved_slots_using_connect/log.sp>
+#include <basic_reserved_slots_using_connect/convar.sp>
+#include <basic_reserved_slots_using_connect/database.sp>
+#include <basic_reserved_slots_using_connect/lateload.sp>
 
 public Plugin myinfo = 
 {
@@ -55,54 +32,14 @@ public Plugin myinfo =
 
 public void OnPluginStart()
 {
-	ConVar g_hcvarVer = CreateConVar("sm_brsc_version", PLUGIN_VERSION, "Basic Reserved Slots using Connect - version cvar", FCVAR_NOTIFY|FCVAR_DONTRECORD);
-	g_hcvarEnabled = CreateConVar("sm_brsc_enabled", "1", "Enables/disables this plugin", FCVAR_NONE, true, 0.0, true, 1.0);
-	g_hcvarKickType = CreateConVar("sm_brsc_type", "1", "Who gets kicked out: 1 - Highest ping player, 2 - Longest connection time player, 3 - Longest time played in database, 0 - Random player", FCVAR_NONE, true, 0.0, true, 3.0);
-	g_hcvarReason = CreateConVar("sm_brsc_reason", "Kicked to make room for an admin", "Reason used when kicking players", FCVAR_NONE);
-	g_hcvarCooldownTime = CreateConVar("sm_brsc_cooldown_time", "60", "Cooldown time for re use of reservation slot", FCVAR_NONE);
-	g_hcvarPlayerCountCondition = CreateConVar("sm_brsc_player_count", "28", "Minimum players count for kick player queue", FCVAR_NONE);
-	g_hcvarRedirectionServerAddress = CreateConVar("sm_brsc_redirection_server_address", "", "Redirected server address for kicked players (\"\" for No redirection)", FCVAR_NONE);
-
-	HookConVarChange(g_hcvarCooldownTime, ConVarCooldownTime);
-	HookConVarChange(g_hcvarPlayerCountCondition, ConVarPlayerCountCondition);
-	HookConVarChange(g_hcvarRedirectionServerAddress, ConVarRedirectionServerAddress);
-
-	SetConVarString(g_hcvarVer, PLUGIN_VERSION);	
-	AutoExecConfig(true, "Basic_Reserved_Slots_using_Connect");
+	SetupConVars();
 
 	g_hReservedSlotsUsageCookie = new Cookie("brsc_reserved_used", "Whether client used reserved slots in the session", CookieAccess_Protected);
 	g_hReservedSlotsUsageTempStringMap = new StringMap();
 
 	HookEvent("player_disconnect", Event_PlayerDisconnect, EventHookMode_Pre);
 
-	if(g_bLateLoad)
-	{
-		g_iCurrentValidPlayerCount = 0;
-		g_bPlayerTickStartEnabled = false;
-
-		for(int i = 1; i <= MaxClients; i++)
-		{
-			if(!IsValidClient(i))
-				continue;
-			
-			g_iCurrentValidPlayerCount += 1;
-		}
-
-		if(g_iCurrentValidPlayerCount >= g_icvarPlayerCountCondition)
-		{
-			g_bPlayerTickStartEnabled = true;
-
-			int currentTime = GetTime();
-
-			for(int i = 1; i <= MaxClients; i++)
-			{
-				if(!IsValidClient(i))
-					continue;
-			
-				g_iPlayerTickStartTime[i] = currentTime;
-			}
-		}
-	}
+	HandleLateLoad();
 }
 
 public void OnPluginEnd()
@@ -634,292 +571,3 @@ bool checkNonDonorAllowed(Database db, const char[] steamID)
 }
 
 // ConVar
-
-void ConVarCooldownTime(ConVar convar, const char[] oldValue, const char[] newValue)
-{
-	int iNewValue = StringToInt(newValue);
-
-	if(iNewValue != 0)
-	{
-		g_icvarCooldownTime = iNewValue;
-	}
-}
-
-void ConVarPlayerCountCondition(ConVar convar, const char[] oldValue, const char[] newValue)
-{
-	int iOldValue = g_icvarPlayerCountCondition;
-	int iNewValue = StringToInt(newValue);
-	
-	g_icvarPlayerCountCondition = iNewValue;
-
-	if(iOldValue > iNewValue && g_iCurrentValidPlayerCount >= g_icvarPlayerCountCondition && !g_bPlayerTickStartEnabled)
-	{
-		g_bPlayerTickStartEnabled = true;
-
-		int currentTime = GetTime();
-
-		for(int i = 1; i <= MaxClients; i++)
-		{
-			if(!IsValidClient(i))
-				continue;
-			
-			g_iPlayerTickStartTime[i] = currentTime;
-		}
-	}
-	else if(iOldValue < iNewValue && g_iCurrentValidPlayerCount < g_icvarPlayerCountCondition && g_bPlayerTickStartEnabled)
-	{
-		int time_played;
-		char steamID[32];
-
-		int currentTime = GetTime();
-
-		g_bPlayerTickStartEnabled = false;
-
-		Database db = connectToDatabase();
-
-		if(db == null)
-		{
-			return;
-		}
-
-		for(int i = 1; i <= MaxClients; i++)
-		{
-			if(g_iPlayerTickStartTime[i] == 0)
-				continue;
-			
-			time_played = currentTime - g_iPlayerTickStartTime[i];
-
-			g_iPlayerTickStartTime[i] = 0;
-
-			if(!GetClientAuthId(i, AuthId_Steam2, steamID, sizeof(steamID))) continue;
-
-			InsertTimePlayed(db, steamID, time_played);
-		}
-
-		delete db;
-	}
-}
-
-void ConVarRedirectionServerAddress(ConVar convar, const char[] oldValue, const char[] newValue)
-{
-	strcopy(g_sRedirectionServerAddress, sizeof(g_sRedirectionServerAddress), newValue);
-}
-
-// DB
-
-bool db_createTableSuccess = false;
-
-char db_createReserveUsage[] = "CREATE TABLE IF NOT EXISTS `reserved_slots_usage` ( \
-	`id` INT NOT NULL AUTO_INCREMENT PRIMARY KEY, \
-	`steam_id` VARCHAR(32) NOT NULL, \
-	`victim_steam_id` VARCHAR(32) NOT NULL, \
-	`timestamp` TIMESTAMP DEFAULT CURRENT_TIMESTAMP() \
-);";
-
-char db_usageInsert[] = "INSERT INTO `reserved_slots_usage` (`steam_id`, `victim_steam_id`) VALUES ('%s', '%s');";
-char db_usageSelect[] = "SELECT NOT EXISTS(SELECT 1 FROM `reserved_slots_usage` WHERE `steam_id` = '%s' GROUP BY `steam_id` HAVING MAX(`timestamp`) >= NOW() - INTERVAL %d MINUTE) AND NOT EXISTS(SELECT 1 FROM `reserved_slots_usage` WHERE `victim_steam_id` = '%s' GROUP BY `victim_steam_id` HAVING MAX(`timestamp`) >= NOW() - INTERVAL %d MINUTE);";
-char db_usageNonDonorSelect[] = "SELECT (SELECT COUNT(*) FROM `reserved_slots_usage` WHERE `victim_steam_id` = '%s' AND `steam_id` != `victim_steam_id` AND TIMESTAMPDIFF(DAY, `timestamp`, CURRENT_TIMESTAMP()) < 2) - 2 * (SELECT COUNT(*) FROM `reserved_slots_usage` WHERE `steam_id` = '%s' AND `steam_id` != `victim_steam_id` AND TIMESTAMPDIFF(DAY, `timestamp`, CURRENT_TIMESTAMP()) < 2) >= 2;";
-
-char db_createTimePlayed[] = "CREATE TABLE IF NOT EXISTS `time_played` ( \
-	`id` INT NOT NULL AUTO_INCREMENT PRIMARY KEY, \
-	`steam_id` VARCHAR(32) NOT NULL, \
-	`total_time` INT NOT NULL, \
-	`timestamp` TIMESTAMP DEFAULT CURRENT_TIMESTAMP(), \
-	`session_time` INT NOT NULL \
-);";
-
-char db_timePlayedInsert[] = "INSERT INTO `time_played` (`steam_id`, `total_time`, `session_time`) VALUES ('%s', IFNULL((SELECT `A`.`total_time` FROM (SELECT `total_time` + %d as `total_time` FROM `time_played` WHERE `steam_id` = '%s' ORDER BY `id` DESC LIMIT 1) as `A`), %d), %d);";
-char db_timePlayedReset[] = "INSERT INTO `time_played` (`steam_id`, `total_time`, `session_time`) VALUES ('%s', 0, 0);";
-char db_timePlayedSelect[] = "SELECT `total_time` FROM `time_played` WHERE `steam_id` = '%s' ORDER BY `id` DESC LIMIT 1;";
-
-Database connectToDatabase()
-{
-	char error[255];
-	Database db;
-	
-	if(SQL_CheckConfig("reserved_slots"))
-	{
-		db = SQL_Connect("reserved_slots", true, error, sizeof(error));
-	}
-	else
-	{
-		db = SQL_Connect("default", true, error, sizeof(error));
-	}
-	
-	if(db == null)
-	{
-		LogError("Could not connect to database: %s", error);
-
-		return db;
-	}
-
-	if(!db_createTableSuccess && !(SQL_FastQuery(db, db_createReserveUsage) && SQL_FastQuery(db, db_createTimePlayed)))
-	{
-		SQL_GetError(db, error, sizeof(error));
-		LogError("Could not query to database: %s", error);
-
-		delete db;
-		return null;
-	}
-
-	db_createTableSuccess = true;
-	
-	return db;
-}
-
-bool InsertUsage(Database db, const char[] steamID, const char[] victimSteamID)
-{
-	char error[255];
-
-	int queryStatementLength = sizeof(db_usageInsert) + strlen(steamID) + strlen(victimSteamID);
-	char[] queryStatement = new char[queryStatementLength];
-	Format(queryStatement, queryStatementLength, db_usageInsert, steamID, victimSteamID);
-
-	if(!SQL_FastQuery(db, queryStatement))
-	{
-		SQL_GetError(db, error, sizeof(error));
-		LogError("Could not query to database: %s", error);
-
-		return false;
-	}
-
-	return true;
-}
-
-bool SelectUsage(Database db, const char[] steamID, int &available)
-{
-	char error[255];
-
-	int queryStatementLength = sizeof(db_usageSelect) + 2 * strlen(steamID) + 20;
-	char[] queryStatement = new char[queryStatementLength];
-	Format(queryStatement, queryStatementLength, db_usageSelect, steamID, g_icvarCooldownTime, steamID, g_icvarCooldownTime);
-
-	DBResultSet hQuery;
-
-	if((hQuery = SQL_Query(db, queryStatement)) == null)
-	{
-		SQL_GetError(db, error, sizeof(error));
-		LogError("Could not query to database: %s", error);
-
-		return false;
-	}
-
-	if(SQL_FetchRow(hQuery))
-	{
-		available = SQL_FetchInt(hQuery, 0);
-	}
-
-	delete hQuery;
-
-	return true;
-}
-
-bool SelectNonDonorUsage(Database db, const char[] steamID, int &available)
-{
-	char error[255];
-
-	int queryStatementLength = sizeof(db_usageNonDonorSelect) + 2 * strlen(steamID);
-	char[] queryStatement = new char[queryStatementLength];
-	Format(queryStatement, queryStatementLength, db_usageNonDonorSelect, steamID, steamID);
-
-	DBResultSet hQuery;
-
-	if((hQuery = SQL_Query(db, queryStatement)) == null)
-	{
-		SQL_GetError(db, error, sizeof(error));
-		LogError("Could not query to database: %s", error);
-
-		return false;
-	}
-
-	if(SQL_FetchRow(hQuery))
-	{
-		available = SQL_FetchInt(hQuery, 0);
-	}
-
-	delete hQuery;
-
-	return true;
-}
-
-bool InsertTimePlayed(Database db, const char[] steamID, int time)
-{
-	char error[255];
-
-	int queryStatementLength = sizeof(db_timePlayedInsert) + 2 * strlen(steamID) + 30;
-	char[] queryStatement = new char[queryStatementLength];
-	Format(queryStatement, queryStatementLength, db_timePlayedInsert, steamID, time, steamID, time, time);
-
-	if(!SQL_FastQuery(db, queryStatement))
-	{
-		SQL_GetError(db, error, sizeof(error));
-		LogError("Could not query to database: %s", error);
-
-		return false;
-	}
-
-	return true;
-}
-
-bool ResetTimePlayed(Database db, const char[] steamID)
-{
-	char error[255];
-
-	int queryStatementLength = sizeof(db_timePlayedInsert) + strlen(steamID);
-	char[] queryStatement = new char[queryStatementLength];
-	Format(queryStatement, queryStatementLength, db_timePlayedReset, steamID);
-
-	if(!SQL_FastQuery(db, queryStatement))
-	{
-		SQL_GetError(db, error, sizeof(error));
-		LogError("Could not query to database: %s", error);
-
-		return false;
-	}
-
-	return true;
-}
-
-bool SelectTimePlayed(Database db, const char[] steamID, int &time)
-{
-	char error[255];
-
-	int queryStatementLength = sizeof(db_timePlayedSelect) + strlen(steamID);
-	char[] queryStatement = new char[queryStatementLength];
-	Format(queryStatement, queryStatementLength, db_timePlayedSelect, steamID);
-
-	DBResultSet hQuery;
-
-	if((hQuery = SQL_Query(db, queryStatement)) == null)
-	{
-		SQL_GetError(db, error, sizeof(error));
-		LogError("Could not query to database: %s", error);
-
-		return false;
-	}
-
-	if(SQL_FetchRow(hQuery))
-	{
-		time = SQL_FetchInt(hQuery, 0);
-	}
-
-	delete hQuery;
-
-	return true;
-}
-
-// Logging
-
-stock void LogBRSCMessage(const char[] message, any ...)
-{
-    int size = strlen(message) + 255;
-    char[] fMessage = new char[size];
-    VFormat(fMessage, size, message, 2);
-    
-    char fileName[PLATFORM_MAX_PATH];
-    char timeStamp[64];
-    FormatTime(timeStamp, sizeof(timeStamp), "%Y%m%d", GetTime());
-    BuildPath(Path_SM, fileName, sizeof(fileName), "logs/BRSC_%s.log", timeStamp);
-    
-    LogToFile(fileName, fMessage);
-}
