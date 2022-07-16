@@ -10,7 +10,7 @@ int g_icvarPlayerCountCondition = 28;
 
 char g_sRedirectionServerAddress[128] = "";
 
-void SetupConVars()
+void SetUpConVars()
 {
 	CreateConVar("sm_brsc_version", PLUGIN_VERSION, "Basic Reserved Slots using Connect - version cvar", FCVAR_NOTIFY|FCVAR_DONTRECORD);
 	g_hcvarEnabled = CreateConVar("sm_brsc_enabled", "1", "Enables/disables this plugin", FCVAR_NONE, true, 0.0, true, 1.0);

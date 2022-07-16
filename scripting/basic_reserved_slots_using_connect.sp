@@ -13,13 +13,11 @@ bool g_bPlayerTickStartEnabled = false;
 int g_iPlayerTickStartTime[MAXPLAYERS + 1] = { 0, ... };
 int g_iCurrentValidPlayerCount = 0;
 
-Cookie g_hReservedSlotsUsageCookie = null;
-StringMap g_hReservedSlotsUsageTempStringMap = null;
-
-#include <basic_reserved_slots_using_connect/log.sp>
 #include <basic_reserved_slots_using_connect/convar.sp>
 #include <basic_reserved_slots_using_connect/database.sp>
 #include <basic_reserved_slots_using_connect/lateload.sp>
+#include <basic_reserved_slots_using_connect/logging.sp>
+#include <basic_reserved_slots_using_connect/tracking.sp>
 
 public Plugin myinfo = 
 {
@@ -32,20 +30,15 @@ public Plugin myinfo =
 
 public void OnPluginStart()
 {
-	SetupConVars();
-
-	g_hReservedSlotsUsageCookie = new Cookie("brsc_reserved_used", "Whether client used reserved slots in the session", CookieAccess_Protected);
-	g_hReservedSlotsUsageTempStringMap = new StringMap();
-
-	HookEvent("player_disconnect", Event_PlayerDisconnect, EventHookMode_Pre);
+	SetUpConVars();
+	SetUpTracking();
 
 	HandleLateLoad();
 }
 
 public void OnPluginEnd()
 {
-	delete g_hReservedSlotsUsageTempStringMap;
-	delete g_hReservedSlotsUsageCookie;
+	TerminateTracking();
 
 	if(g_bPlayerTickStartEnabled)
 	{
@@ -111,22 +104,6 @@ public void OnClientPutInServer(int client)
 	}
 }
 
-public void OnClientCookiesCached(int client)
-{
-	char steamID[32];
-	GetClientAuthId(client, AuthId_Steam2, steamID, sizeof(steamID));
-
-	int value = 0;
-	if(g_hReservedSlotsUsageTempStringMap.GetValue(steamID, value) && value == 1)
-	{
-		SetClientCookie(client, g_hReservedSlotsUsageCookie, "1");
-		g_hReservedSlotsUsageTempStringMap.Remove(steamID);
-	}
-	else
-	{
-		SetClientCookie(client, g_hReservedSlotsUsageCookie, "0");
-	}
-}
 
 public void OnClientDisconnect(int client)
 {	
@@ -321,46 +298,13 @@ public bool OnClientPreConnectEx(const char[] name, char password[255], const ch
 
 			KickClientEx(target, "%s", rReason);
 
-			g_hReservedSlotsUsageTempStringMap.SetValue(steamID, 1);
+			AddTracking(steamID);
 		}
 	}
 	
 	return true;
 }
 
-public Action Event_PlayerDisconnect(Event event, const char[] name, bool dontBroadcast)
-{
-	int userid = event.GetInt("userid");
-	int client = GetClientOfUserId(userid);
-
-	if(!IsValidClient(client))
-		return Plugin_Continue;
-	
-	if(!AreClientCookiesCached(client))
-		return Plugin_Continue;
-
-	char reserved[4] = "0";
-	GetClientCookie(client, g_hReservedSlotsUsageCookie, reserved, sizeof(reserved));
-
-	int iReserved = StringToInt(reserved);
-
-	if(iReserved == 0)
-		return Plugin_Continue;
-	
-	char steamID[32];
-	GetClientAuthId(client, AuthId_Steam2, steamID, sizeof(steamID));
-
-	Database db = connectToDatabase();
-
-	if(db == null)
-		return Plugin_Continue;
-		
-	InsertUsage(db, steamID, steamID);
-
-	delete db;
-
-	return Plugin_Continue;
-}
 
 int SelectKickClient()
 {	
@@ -536,5 +480,3 @@ bool checkNonDonorAllowed(Database db, const char[] steamID)
 
 	return true;
 }
-
-// ConVar
