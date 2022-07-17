@@ -1,6 +1,6 @@
 static bool g_bLateLoad = false;
 
-public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
+void SetLateLoad()
 {
 	g_bLateLoad = true;
 }

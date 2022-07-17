@@ -1,6 +1,7 @@
 #include <sourcemod>
 #include <clientprefs>
 #include <connect>
+#include <basic_reserved_slots_using_connect>
 
 #pragma newdecls required
 #pragma semicolon 1
@@ -13,8 +14,11 @@ bool g_bPlayerTickStartEnabled = false;
 int g_iPlayerTickStartTime[MAXPLAYERS + 1] = { 0, ... };
 int g_iCurrentValidPlayerCount = 0;
 
+PrivateForward g_fwdFilter = null;
+
 #include <basic_reserved_slots_using_connect/convar.sp>
 #include <basic_reserved_slots_using_connect/database.sp>
+#include <basic_reserved_slots_using_connect/filter.sp>
 #include <basic_reserved_slots_using_connect/lateload.sp>
 #include <basic_reserved_slots_using_connect/logging.sp>
 #include <basic_reserved_slots_using_connect/tracking.sp>
@@ -28,10 +32,27 @@ public Plugin myinfo =
 	url = "https://forums.alliedmods.net/member.php?u=43109"
 }
 
+public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
+{
+	RegPluginLibrary("brsc");
+
+	CreateNative("BRSC_AddFilter", Native_BRSC_AddFilter);
+
+	SetLateLoad();
+}
+
+public int Native_BRSC_AddFilter(Handle plugin, int numParams)
+{
+	g_fwdFilter.AddFunction(plugin, GetNativeFunction(1));
+
+	return 0;
+}
+
 public void OnPluginStart()
 {
 	SetUpConVars();
 	SetUpTracking();
+	SetUpFilter();
 
 	HandleLateLoad();
 }
@@ -189,104 +210,53 @@ public bool OnClientPreConnectEx(const char[] name, char password[255], const ch
 
 	AdminId admin = FindAdminByIdentity(AUTHMETHOD_STEAM, steamID);
 
-	Database db = null;
-	bool kickCondition = false;
+	FilterState filter = Filter_Continue;
 
-	if (GetAdminFlag(admin, Admin_Generic))
+	Call_StartForward(g_fwdFilter);
+	Call_PushString(steamID);
+	Call_PushCell(admin);
+	Call_PushCellRef(filter);
+	int error = Call_Finish();
+
+	if(error != SP_ERROR_NONE)
 	{
-		LogBRSCDebugMessage("[OnClientPreConnectEx] Access Granted: Admin_Generic (b flag)");
-		kickCondition = true;
-	}
-	
-	if (!kickCondition && GetAdminFlag(admin, Admin_Reservation))
-	{
-		db = connectToDatabase();
-
-		kickCondition = true;
-
-		if(db != null)
-		{
-			LogBRSCDebugMessage("[OnClientPreConnectEx] Checking if connecting player is applicable to reservation...");
-
-			kickCondition = !checkIfUsageExceeded(db, steamID);
-			delete db;
-		}
-		else
-		{
-			LogBRSCDebugMessage("[OnClientPreConnectEx] Database fail, Granting access without checking...");
-		}
-
-		if(kickCondition)
-		{
-			LogBRSCDebugMessage("[OnClientPreConnectEx] Access Granted: Admin_Reservation (a flag)");
-		}
-		else
-		{
-			LogBRSCDebugMessage("[OnClientPreConnectEx] Access Denied: Admin_Reservation (a flag)");
-		}
+		return true;
 	}
 
-	if (!kickCondition)
+	bool accessToReservation = filter == Filter_Accepted;
+
+	if(accessToReservation)
 	{
-		db = connectToDatabase();
+		LogBRSCMessage("Client with steamID '%s' used reservation slot", steamID);
 
-		if(db != null)
-		{
-			LogBRSCDebugMessage("[OnClientPreConnectEx] Checking if connecting player is applicable to reservation...");
-
-			kickCondition = checkNonDonorAllowed(db, steamID);
-			delete db;
-		}
-		else
-		{
-			LogBRSCDebugMessage("[OnClientPreConnectEx] Database fail, Denying access without checking...");
-		}
-
-
-		if(kickCondition)
-		{
-			LogBRSCDebugMessage("[OnClientPreConnectEx] Access Granted: Not admin (no flag)");
-		}
-		else
-		{
-			LogBRSCDebugMessage("[OnClientPreConnectEx] Access Denied: Not admin (no flag)");
-		}
-	}
-
-	if(kickCondition)
-	{
-		LogBRSCDebugMessage("[OnClientPreConnectEx] Invoking SelectKickClient for selecting client to kick...");
+		LogBRSCDebugMessage("[OnClientPreConnectEx] Finding client to be kicked...");
 
 		int target = SelectKickClient();
 
-
-		LogBRSCDebugMessage("[OnClientPreConnectEx] Selected client to kick");
-
-		
-		if(db == null)
+		if(target)
 		{
-			db = connectToDatabase();
-		}
+			LogBRSCDebugMessage("[OnClientPreConnectEx] Found client to be kicked");
 
-		if(target && db != null)
-		{
-			char targetSteamID[32];
-			GetClientAuthId(target, AuthId_Steam2, targetSteamID, sizeof(targetSteamID));
+			Database db = connectToDatabase();
 
-			LogBRSCDebugMessage("[OnClientPreConnectEx] Resetting the total play time of target player: %s...", targetSteamID);
-			ResetTimePlayed(db, targetSteamID);
+			if(db != null)
+			{
+				char targetSteamID[32];
+				GetClientAuthId(target, AuthId_Steam2, targetSteamID, sizeof(targetSteamID));
 
-			LogBRSCDebugMessage("[OnClientPreConnectEx] Inserting the usage of reservation slots of player: (%s, %s)...", steamID, targetSteamID);
-			InsertUsage(db, steamID, targetSteamID);
-		}
+				LogBRSCDebugMessage("[OnClientPreConnectEx] Resetting the total play time of target player: %s...", targetSteamID);
+				ResetTimePlayed(db, targetSteamID);
 
-		if(db != null)
-		{
-			delete db;
-		}
+				LogBRSCDebugMessage("[OnClientPreConnectEx] Inserting the usage of reservation slots of player: (%s, %s)...", steamID, targetSteamID);
+				InsertUsage(db, steamID, targetSteamID);
 
-		if (target)
-		{
+				delete db;
+			}
+			else
+			{
+				LogBRSCDebugMessage("[OnClientPreConnectEx] Database failed...");
+			}
+
 			char rReason[255];
 			GetConVarString(g_hcvarReason, rReason, sizeof(rReason));
 			LogBRSCDebugMessage("[OnClientPreConnectEx] Kicking target player...");
@@ -300,11 +270,14 @@ public bool OnClientPreConnectEx(const char[] name, char password[255], const ch
 
 			AddTracking(steamID);
 		}
+		else
+		{
+			LogBRSCDebugMessage("[OnClientPreConnectEx] Could not find client to be kicked");
+		}
 	}
 	
 	return true;
 }
-
 
 int SelectKickClient()
 {	
