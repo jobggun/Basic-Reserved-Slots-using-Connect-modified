@@ -46,49 +46,11 @@ void ConVarPlayerCountCondition(ConVar convar, const char[] oldValue, const char
 
 	if(iOldValue > iNewValue && g_iCurrentValidPlayerCount >= g_icvarPlayerCountCondition && !g_bPlayerTickStartEnabled)
 	{
-		g_bPlayerTickStartEnabled = true;
-
-		int currentTime = GetTime();
-
-		for(int i = 1; i <= MaxClients; i++)
-		{
-			if(!IsValidClient(i))
-				continue;
-			
-			g_iPlayerTickStartTime[i] = currentTime;
-		}
+		Tick_Start();
 	}
 	else if(iOldValue < iNewValue && g_iCurrentValidPlayerCount < g_icvarPlayerCountCondition && g_bPlayerTickStartEnabled)
 	{
-		int time_played;
-		char steamID[32];
-
-		int currentTime = GetTime();
-
-		g_bPlayerTickStartEnabled = false;
-
-		Database db = connectToDatabase();
-
-		if(db == null)
-		{
-			return;
-		}
-
-		for(int i = 1; i <= MaxClients; i++)
-		{
-			if(g_iPlayerTickStartTime[i] == 0)
-				continue;
-			
-			time_played = currentTime - g_iPlayerTickStartTime[i];
-
-			g_iPlayerTickStartTime[i] = 0;
-
-			if(!GetClientAuthId(i, AuthId_Steam2, steamID, sizeof(steamID))) continue;
-
-			InsertTimePlayed(db, steamID, time_played);
-		}
-
-		delete db;
+		Tick_Stop();
 	}
 }
 

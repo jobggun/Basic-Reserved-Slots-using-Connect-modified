@@ -22,17 +22,7 @@ void HandleLateLoad()
 
 		if(g_iCurrentValidPlayerCount >= g_icvarPlayerCountCondition)
 		{
-			g_bPlayerTickStartEnabled = true;
-
-			int currentTime = GetTime();
-
-			for(int i = 1; i <= MaxClients; i++)
-			{
-				if(!IsValidClient(i))
-					continue;
-			
-				g_iPlayerTickStartTime[i] = currentTime;
-			}
+			Tick_Start();
 		}
 	}
 }

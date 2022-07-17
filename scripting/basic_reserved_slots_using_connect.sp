@@ -21,6 +21,7 @@ PrivateForward g_fwdFilter = null;
 #include <basic_reserved_slots_using_connect/filter.sp>
 #include <basic_reserved_slots_using_connect/lateload.sp>
 #include <basic_reserved_slots_using_connect/logging.sp>
+#include <basic_reserved_slots_using_connect/tick.sp>
 #include <basic_reserved_slots_using_connect/tracking.sp>
 
 public Plugin myinfo = 
@@ -63,35 +64,7 @@ public void OnPluginEnd()
 
 	if(g_bPlayerTickStartEnabled)
 	{
-		int time_played;
-		char steamID[32];
-
-		int currentTime = GetTime();
-
-		g_bPlayerTickStartEnabled = false;
-
-		Database db = connectToDatabase();
-
-		if(db == null)
-		{
-			return;
-		}
-
-		for(int i = 1; i <= MaxClients; i++)
-		{
-			if(g_iPlayerTickStartTime[i] == 0)
-				continue;
-			
-			time_played = currentTime - g_iPlayerTickStartTime[i];
-
-			g_iPlayerTickStartTime[i] = 0;
-
-			if(!GetClientAuthId(i, AuthId_Steam2, steamID, sizeof(steamID))) continue;
-
-			InsertTimePlayed(db, steamID, time_played);
-		}
-
-		delete db;
+		Tick_Stop();
 	}
 }
 
@@ -101,27 +74,17 @@ public void OnClientPutInServer(int client)
 		return;
 
 	g_iCurrentValidPlayerCount += 1;
-	
+
 	if(g_iCurrentValidPlayerCount < g_icvarPlayerCountCondition)
 		return;
 
-	int currentTime = GetTime();
-	
 	if(!g_bPlayerTickStartEnabled)
 	{
-		g_bPlayerTickStartEnabled = true;
-
-		for(int i = 1; i <= MaxClients; i++)
-		{
-			if(!IsValidClient(i))
-				continue;
-			
-			g_iPlayerTickStartTime[i] = currentTime;
-		}
+		Tick_Start();
 	}
 	else
 	{
-		g_iPlayerTickStartTime[client] = currentTime;
+		Tick_AddPlayer(client);
 	}
 }
 
@@ -136,59 +99,13 @@ public void OnClientDisconnect(int client)
 	if(!g_bPlayerTickStartEnabled)
 		return;
 
-	int time_played;
-	char steamID[32];
-
-	int currentTime = GetTime();
-
 	if(g_iCurrentValidPlayerCount >= g_icvarPlayerCountCondition)
 	{
-		if(g_iPlayerTickStartTime[client] == 0)
-			return;
-
-		time_played = currentTime - g_iPlayerTickStartTime[client];
-
-		g_iPlayerTickStartTime[client] = 0;
-
-		if(!GetClientAuthId(client, AuthId_Steam2, steamID, sizeof(steamID))) return;
-
-		Database db = connectToDatabase();
-
-		if(db == null)
-		{
-			return;
-		}
-
-		InsertTimePlayed(db, steamID, time_played);
-
-		delete db;
+		Tick_RemovePlayer(client);
 	}
 	else
 	{
-		g_bPlayerTickStartEnabled = false;
-
-		Database db = connectToDatabase();
-
-		if(db == null)
-		{
-			return;
-		}
-
-		for(int i = 1; i <= MaxClients; i++)
-		{
-			if(g_iPlayerTickStartTime[i] == 0)
-				continue;
-			
-			time_played = currentTime - g_iPlayerTickStartTime[i];
-
-			g_iPlayerTickStartTime[i] = 0;
-
-			if(!GetClientAuthId(i, AuthId_Steam2, steamID, sizeof(steamID))) continue;
-
-			InsertTimePlayed(db, steamID, time_played);
-		}
-
-		delete db;
+		Tick_Stop();
 	}
 }
 
